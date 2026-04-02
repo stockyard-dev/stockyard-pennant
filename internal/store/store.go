@@ -1,13 +1,23 @@
 package store
-import("database/sql";"fmt";"os";"path/filepath";"time";_ "modernc.org/sqlite")
-type DB struct{*sql.DB}
-type Member struct{ID int64 `json:"id"`;UserID string `json:"user_id"`;Name string `json:"name"`;Points int64 `json:"points"`;TotalEarned int64 `json:"total_earned"`;CreatedAt time.Time `json:"created_at"`}
-type Transaction struct{ID int64 `json:"id"`;UserID string `json:"user_id"`;Type string `json:"type"`;Points int64 `json:"points"`;Description string `json:"description"`;CreatedAt time.Time `json:"created_at"`}
-func Open(d string)(*DB,error){os.MkdirAll(d,0755);dsn:=filepath.Join(d,"pennant.db")+"?_journal_mode=WAL&_busy_timeout=5000";db,err:=sql.Open("sqlite",dsn);if err!=nil{return nil,fmt.Errorf("open: %w",err)};db.SetMaxOpenConns(1);migrate(db);return &DB{db},nil}
-func migrate(db *sql.DB){db.Exec(`CREATE TABLE IF NOT EXISTS members(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL UNIQUE,name TEXT DEFAULT '',points INTEGER DEFAULT 0,total_earned INTEGER DEFAULT 0,created_at DATETIME DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS transactions(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,type TEXT NOT NULL CHECK(type IN('earn','redeem')),points INTEGER NOT NULL,description TEXT DEFAULT '',created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`)}
-func(db *DB)Award(userID,name string,points int64,desc string)error{db.Exec(`INSERT INTO members(user_id,name,points,total_earned)VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET name=excluded.name,points=points+?,total_earned=total_earned+?`,userID,name,points,points,points,points);_,err:=db.Exec(`INSERT INTO transactions(user_id,type,points,description)VALUES(?,?,?,?)`,userID,"earn",points,desc);return err}
-func(db *DB)Redeem(userID string,points int64,desc string)error{var bal int64;db.QueryRow(`SELECT points FROM members WHERE user_id=?`,userID).Scan(&bal);if bal<points{return fmt.Errorf("insufficient points")};db.Exec(`UPDATE members SET points=points-? WHERE user_id=?`,points,userID);_,err:=db.Exec(`INSERT INTO transactions(user_id,type,points,description)VALUES(?,?,?,?)`,userID,"redeem",points,desc);return err}
-func(db *DB)GetMember(userID string)(*Member,error){var m Member;err:=db.QueryRow(`SELECT id,user_id,name,points,total_earned,created_at FROM members WHERE user_id=?`,userID).Scan(&m.ID,&m.UserID,&m.Name,&m.Points,&m.TotalEarned,&m.CreatedAt);if err!=nil{return nil,err};return &m,nil}
-func(db *DB)ListMembers()([]Member,error){rows,_:=db.Query(`SELECT id,user_id,name,points,total_earned,created_at FROM members ORDER BY points DESC`);defer rows.Close();var out[]Member;for rows.Next(){var m Member;rows.Scan(&m.ID,&m.UserID,&m.Name,&m.Points,&m.TotalEarned,&m.CreatedAt);out=append(out,m)};return out,nil}
-func(db *DB)History(userID string)([]Transaction,error){rows,_:=db.Query(`SELECT id,user_id,type,points,description,created_at FROM transactions WHERE user_id=? ORDER BY created_at DESC LIMIT 50`,userID);defer rows.Close();var out[]Transaction;for rows.Next(){var t Transaction;rows.Scan(&t.ID,&t.UserID,&t.Type,&t.Points,&t.Description,&t.CreatedAt);out=append(out,t)};return out,nil}
-func(db *DB)Stats()(map[string]interface{},error){var members int;var points int64;db.QueryRow(`SELECT COUNT(*),COALESCE(SUM(points),0) FROM members`).Scan(&members,&points);return map[string]interface{}{"members":members,"total_points_outstanding":points},nil}
+import ("database/sql";"fmt";"os";"path/filepath";"time";_ "modernc.org/sqlite")
+type DB struct{db *sql.DB}
+type Item struct{
+	ID string `json:"id"`
+	Name string `json:"name"`
+	Description string `json:"description"`
+	Status string `json:"status"`
+	Category string `json:"category"`
+	Tags string `json:"tags"`
+	CreatedAt string `json:"created_at"`
+}
+func Open(d string)(*DB,error){if err:=os.MkdirAll(d,0755);err!=nil{return nil,err};db,err:=sql.Open("sqlite",filepath.Join(d,"pennant.db")+"?_journal_mode=WAL&_busy_timeout=5000");if err!=nil{return nil,err}
+db.Exec(`CREATE TABLE IF NOT EXISTS items(id TEXT PRIMARY KEY,name TEXT NOT NULL,description TEXT DEFAULT '',status TEXT DEFAULT 'active',category TEXT DEFAULT '',tags TEXT DEFAULT '',created_at TEXT DEFAULT(datetime('now')))`)
+return &DB{db:db},nil}
+func(d *DB)Close()error{return d.db.Close()}
+func genID()string{return fmt.Sprintf("%d",time.Now().UnixNano())}
+func now()string{return time.Now().UTC().Format(time.RFC3339)}
+func(d *DB)Create(e *Item)error{e.ID=genID();e.CreatedAt=now();_,err:=d.db.Exec(`INSERT INTO items(id,name,description,status,category,tags,created_at)VALUES(?,?,?,?,?,?,?)`,e.ID,e.Name,e.Description,e.Status,e.Category,e.Tags,e.CreatedAt);return err}
+func(d *DB)Get(id string)*Item{var e Item;if d.db.QueryRow(`SELECT id,name,description,status,category,tags,created_at FROM items WHERE id=?`,id).Scan(&e.ID,&e.Name,&e.Description,&e.Status,&e.Category,&e.Tags,&e.CreatedAt)!=nil{return nil};return &e}
+func(d *DB)List()[]Item{rows,_:=d.db.Query(`SELECT id,name,description,status,category,tags,created_at FROM items ORDER BY created_at DESC`);if rows==nil{return nil};defer rows.Close();var o []Item;for rows.Next(){var e Item;rows.Scan(&e.ID,&e.Name,&e.Description,&e.Status,&e.Category,&e.Tags,&e.CreatedAt);o=append(o,e)};return o}
+func(d *DB)Delete(id string)error{_,err:=d.db.Exec(`DELETE FROM items WHERE id=?`,id);return err}
+func(d *DB)Count()int{var n int;d.db.QueryRow(`SELECT COUNT(*) FROM items`).Scan(&n);return n}

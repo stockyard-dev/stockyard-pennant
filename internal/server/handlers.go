@@ -1,8 +1,0 @@
-package server
-import("encoding/json";"net/http";"github.com/stockyard-dev/stockyard-pennant/internal/store")
-func(s *Server)handleListMembers(w http.ResponseWriter,r *http.Request){list,_:=s.db.ListMembers();if list==nil{list=[]store.Member{}};writeJSON(w,200,list)}
-func(s *Server)handleAward(w http.ResponseWriter,r *http.Request){var req struct{UserID string `json:"user_id"`;Name string `json:"name"`;Points int64 `json:"points"`;Description string `json:"description"`};json.NewDecoder(r.Body).Decode(&req);if req.UserID==""||req.Points==0{writeError(w,400,"user_id and points required");return};if err:=s.db.Award(req.UserID,req.Name,req.Points,req.Description);err!=nil{writeError(w,500,err.Error());return};writeJSON(w,200,map[string]string{"status":"awarded"})}
-func(s *Server)handleRedeem(w http.ResponseWriter,r *http.Request){var req struct{UserID string `json:"user_id"`;Points int64 `json:"points"`;Description string `json:"description"`};json.NewDecoder(r.Body).Decode(&req);if req.UserID==""||req.Points==0{writeError(w,400,"user_id and points required");return};if err:=s.db.Redeem(req.UserID,req.Points,req.Description);err!=nil{writeError(w,400,err.Error());return};writeJSON(w,200,map[string]string{"status":"redeemed"})}
-func(s *Server)handleMember(w http.ResponseWriter,r *http.Request){uid:=r.PathValue("user_id");m,err:=s.db.GetMember(uid);if err!=nil{writeError(w,404,"not found");return};writeJSON(w,200,m)}
-func(s *Server)handleHistory(w http.ResponseWriter,r *http.Request){uid:=r.PathValue("user_id");list,_:=s.db.History(uid);if list==nil{list=[]store.Transaction{}};writeJSON(w,200,list)}
-func(s *Server)handleOverview(w http.ResponseWriter,r *http.Request){m,_:=s.db.Stats();writeJSON(w,200,m)}
